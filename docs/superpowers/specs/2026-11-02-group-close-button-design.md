@@ -59,3 +59,15 @@ Zen power users keep dozens of tabs in groups/folders and want a group to be as 
 
 - Exact harness timing/wait loops; how to obtain window bounds for `screencapture` (System Events bounds by pid is the suggested route).
 - README wording and screenshot cropping.
+
+## Implementation notes (post-review, 2026-11-02)
+
+The shipped `chrome.css` differs from decision 5 in these points, each driven by a review finding:
+
+- Header-row, label-flex and title rules are prefixed with `:root[zen-sidebar-expanded]` so the collapsed sidebar's square labels stay stock.
+- The title rule also sets `background-color: transparent`, `max-width: none`, `text-align: start` so stock (non-ATG) plain-group pills stay legible.
+- The button has `order: 1` so ATG's hover "Convert to Folder" button never lands to its right.
+- An RTL-only `margin-inline-end` keeps the × off Zen's physically positioned folder icon.
+- The ATG duplicate rule uses child combinators; a `[drag-image]` rule hides the × in drag clones.
+- A collapsed stock plain group loses its outlined-pill cue (keyboard focus ring kept); only affects Zen without ATG.
+- JS: `event.detail > 1` guard and a `WeakSet` of groups being closed; the × is removed with one warning if Zen's `.close-icon` glyph is missing.
