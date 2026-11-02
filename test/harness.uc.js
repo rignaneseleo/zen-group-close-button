@@ -127,11 +127,16 @@
     const p = m[1].split(/[\s,/]+/).filter(Boolean).map(Number);
     return [p[0], p[1], p[2], p.length > 3 ? p[3] : 1];
   }
-  const sameRgb = (a, b) => {
-    const pa = parseColor(a);
-    const pb = parseColor(b);
-    return !!pa && !!pb && pa[0] === pb[0] && pa[1] === pb[1] && pa[2] === pb[2];
-  };
+
+  // --toolbar-color resolved via a probe inside #tabbrowser-tabs (the sidebar text colour).
+  function toolbarColor() {
+    const probe = document.createElement("div");
+    probe.style.color = "var(--toolbar-color)";
+    gBrowser.tabContainer.appendChild(probe);
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  }
 
   // First non-transparent computed background-color walking up from el (crossing shadow
   // roots), then #navigator-toolbox, then body. Returns {color, source}.
@@ -284,9 +289,12 @@
     });
 
     await guard("button-visible", async () => {
+      const expected = toolbarColor();
       const problems = [];
       const seen = [];
       for (const [key, group] of targets) {
+        // Background is informational only: depending on window translucency the walk finds
+        // #zen-main-app-wrapper or nothing opaque. The pass criterion is color === --toolbar-color.
         const bg = opaqueBackgroundOf(labelContainerOf(group));
         const btn = buttonOf(group);
         if (!btn) {
@@ -298,24 +306,21 @@
         if (cs.display === "none") problems.push(`${key}: display none`);
         if (cs.visibility !== "visible") problems.push(`${key}: visibility ${cs.visibility}`);
         if (!(opacity >= 0.5 && opacity <= 0.7)) problems.push(`${key}: opacity ${cs.opacity}`);
-        if (sameRgb(cs.color, bg.color)) {
-          problems.push(`${key}: color ${cs.color} equals bg ${bg.color} from ${bg.source}`);
+        if (cs.color !== expected) {
+          problems.push(`${key}: color ${cs.color} != --toolbar-color ${expected}`);
         }
-        seen.push(`${key}: color ${cs.color} vs bg ${bg.color} from ${bg.source}`);
+        seen.push(`${key}: color ${cs.color} (bg ${bg.color} from ${bg.source})`);
       }
       add(
         "button-visible",
         targets.length > 0 && problems.length === 0,
-        problems.length ? [...problems, ...seen].join("; ") : `ok (${seen.join("; ")})`
+        (problems.length ? [...problems, ...seen].join("; ") : `ok (${seen.join("; ")})`) +
+          `; expected color ${expected}`
       );
     });
 
     await guard("label-color", async () => {
-      const probe = document.createElement("div");
-      probe.style.color = "var(--toolbar-color)";
-      gBrowser.tabContainer.appendChild(probe);
-      const expected = getComputedStyle(probe).color;
-      probe.remove();
+      const expected = toolbarColor();
       const problems = [];
       for (const [key, group] of targets) {
         const label = labelContainerOf(group)?.querySelector(":scope > .tab-group-label");
