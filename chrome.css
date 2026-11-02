@@ -1,0 +1,65 @@
+/* Group Close Button — USER sheet: every rule is !important and scoped under #tabbrowser-tabs. */
+
+/* Header row: beats Zen's plain tab-group header, which is a vbox (column); folders are already a row. */
+#tabbrowser-tabs :is(tab-group, zen-folder):not([split-view-group]) > .tab-group-label-container {
+  flex-direction: row !important;
+  align-items: center !important;
+}
+
+/* Label flex: beats Zen/ATG label sizing so a long title shrinks instead of pushing the × out. */
+#tabbrowser-tabs :is(tab-group, zen-folder):not([split-view-group]) > .tab-group-label-container > .tab-group-label {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+/* Button: beats Zen's .close-icon sizing/colour so it matches the sidebar text, dimmed at rest. */
+#tabbrowser-tabs .tab-group-label-container > .zen-group-close-button {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex: 0 0 auto !important;
+  margin-inline-start: auto !important;
+  width: 20px !important;
+  height: 20px !important;
+  padding: 4px !important;
+  box-sizing: border-box !important;
+  border-radius: var(--tab-border-radius, 6px) !important;
+  color: var(--toolbar-color) !important;
+  -moz-context-properties: fill, fill-opacity !important;
+  fill: currentColor !important;
+  opacity: 0.6 !important;
+  -moz-window-dragging: no-drag !important;
+  transition: opacity 120ms, background-color 120ms !important;
+}
+
+/* Hover/active: mirrors Zen's native .tab-close-button hover (10%) and active (20%) wash. */
+#tabbrowser-tabs .tab-group-label-container > .zen-group-close-button:hover {
+  opacity: 1 !important;
+  background-color: color-mix(in srgb, currentColor 10%, transparent) !important;
+}
+
+#tabbrowser-tabs .tab-group-label-container > .zen-group-close-button:hover:active {
+  background-color: color-mix(in srgb, currentColor 20%, transparent) !important;
+}
+
+/* Reduced motion: beats the button transition above for users who ask for no animation. */
+@media (prefers-reduced-motion: reduce) {
+  #tabbrowser-tabs .tab-group-label-container > .zen-group-close-button {
+    transition: none !important;
+  }
+}
+
+/* Collapsed sidebar: beats the button display above; Zen hides group labels when the sidebar is collapsed. */
+:root:not([zen-sidebar-expanded]) #tabbrowser-tabs .tab-group-label-container > .zen-group-close-button {
+  display: none !important;
+}
+
+/* ATG duplicate: beats ATG's hover-only header .tab-close-button rule (0,4,1) via the id prefix. */
+#tabbrowser-tabs tab-group:has(> .tab-group-label-container > .zen-group-close-button) .tab-group-label-container .tab-close-button {
+  display: none !important;
+}
+
+/* Title color: beats ATG/Zen group-colour label text so titles use the sidebar text colour. */
+#tabbrowser-tabs :is(tab-group, zen-folder):not([split-view-group]) > .tab-group-label-container > .tab-group-label {
+  color: var(--toolbar-color) !important;
+}

@@ -1,0 +1,23 @@
+{
+  "id": "zen-group-close-button",
+  "name": "Group Close Button",
+  "description": "One-click close (×) on tab-group and folder headers, plus native title color.",
+  "author": "rignaneseleo",
+  "version": "1.0.0",
+  "fork": ["zen"],
+  "style": {
+    "chrome": "chrome.css"
+  },
+  "scripts": {
+    "zen-group-close-button.uc.js": {
+      "include": ["chrome://browser/content/browser.xhtml"],
+      "loadOrder": 30
+    }
+  },
+  "supportsUnload": true,
+  "readme": "https://raw.githubusercontent.com/rignaneseleo/zen-group-close-button/main/README.md",
+  "image": "https://raw.githubusercontent.com/rignaneseleo/zen-group-close-button/main/assets/after.png",
+  "tags": ["Zen Browser", "Tab Groups", "Folders", "Vertical Tabs"],
+  "createdAt": "2026-11-02",
+  "updatedAt": "2026-11-02"
+}
