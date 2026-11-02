@@ -4,11 +4,15 @@
 # installs the mod + a harness mod, launches a second Zen instance, screenshots the
 # sidebar, collects the harness results and exits non-zero on any failed assertion.
 #
-# Usage: ./test/run.sh [--before] [--theme light|dark]
+# Usage: ./test/run.sh [--before] [--theme light|dark] [--no-atg | --atg-look default|arc] [--bidi]
+#   --no-atg           leave Advanced Tab Groups out of the profile (plain Zen groups + folders)
+#   --atg-look LOOK    default: ATG's own look (folder-look off); arc: folder-look off + arc-style on
+#   --bidi             intl.l10n.pseudo="bidi" (right-to-left UI)
+# The live profile to clone chrome/ from is $ZGCB_LIVE_PROFILE (default: the author's profile).
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LIVE="$HOME/Library/Application Support/zen/Profiles/qtvkhs1o.Default (release)"
+LIVE="${ZGCB_LIVE_PROFILE:-$HOME/Library/Application Support/zen/Profiles/qtvkhs1o.Default (release)}"
 TP="$REPO/.scratch/profile"
 SHOTS="$REPO/.scratch/shots"
 ZEN=/Applications/Zen.app/Contents/MacOS/zen
@@ -17,6 +21,9 @@ SIDEBAR_PT=320 # sidebar crop width, in points
 
 BEFORE=false
 THEME=dark
+ATG_ON=true
+ATG_LOOK="" # empty = whatever the profile gives (ATG's folder-look default: on)
+BIDI=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --before) BEFORE=true ;;
@@ -24,8 +31,14 @@ while [ $# -gt 0 ]; do
       THEME="${2:-}"
       shift
       ;;
+    --no-atg) ATG_ON=false ;;
+    --atg-look)
+      ATG_LOOK="${2:-}"
+      shift
+      ;;
+    --bidi) BIDI=true ;;
     -h | --help)
-      sed -n '2,7p' "$0"
+      sed -n '2,11p' "$0"
       exit 0
       ;;
     *)
@@ -43,6 +56,22 @@ case "$THEME" in
     exit 2
     ;;
 esac
+case "$ATG_LOOK" in
+  "" | default | arc) ;;
+  *)
+    echo "--atg-look must be default or arc" >&2
+    exit 2
+    ;;
+esac
+if ! $ATG_ON && [ -n "$ATG_LOOK" ]; then
+  echo "--atg-look cannot be combined with --no-atg" >&2
+  exit 2
+fi
+# Screenshot name suffix so variant runs do not overwrite the default ones.
+VARIANT=""
+$ATG_ON || VARIANT="$VARIANT-noatg"
+[ -n "$ATG_LOOK" ] && VARIANT="$VARIANT-atg-$ATG_LOOK"
+$BIDI && VARIANT="$VARIANT-bidi"
 $BEFORE && MODE=before || MODE=after
 $BEFORE && MOD_ENABLED=false || MOD_ENABLED=true
 
@@ -87,13 +116,24 @@ trap cleanup EXIT
 #    button) that would contaminate both screenshots and assertions, so it is left out.
 rm -rf "$TP"
 mkdir -p "$TP/chrome" "$SHOTS"
-rsync -a --exclude 'sine-mods/zen-tidy-tabs' --exclude '*.bak*' --exclude '/userChrome.css' \
-  "$LIVE/chrome/" "$TP/chrome/"
+RSYNC_EXCLUDES=(--exclude 'sine-mods/zen-tidy-tabs' --exclude '*.bak*' --exclude '/userChrome.css')
+$ATG_ON || RSYNC_EXCLUDES+=(--exclude 'sine-mods/advanced-tab-groups')
+rsync -a "${RSYNC_EXCLUDES[@]}" "$LIVE/chrome/" "$TP/chrome/"
 MODS="$TP/chrome/sine-mods"
+LIVE_ATG_ENTRY="null"
+if $ATG_ON; then
+  LIVE_ATG_ENTRY="$(jq -c '."advanced-tab-groups" // null' "$LIVE/chrome/sine-mods/mods.json")"
+  if [ "$LIVE_ATG_ENTRY" = "null" ] || [ ! -d "$MODS/advanced-tab-groups" ]; then
+    echo "WARNING: Advanced Tab Groups not found in the live profile; running without it" >&2
+    ATG_ON=false
+    LIVE_ATG_ENTRY="null"
+    rm -rf "$MODS/advanced-tab-groups"
+  fi
+fi
 
 # 1b. The live ATG copy carries local "LEO" patches (a hand-made close X in folder-look.uc.js and
 #     a title-colour block in userChrome.css) that do what this mod does. Undo them in the copy
-#     so the test exercises the mod against stock ATG.
+#     so the test exercises the mod against stock ATG. Every step is a no-op when the files are absent.
 ATG="$MODS/advanced-tab-groups"
 if grep -q 'leo-group-close' "$ATG/folder-look.uc.js" 2>/dev/null; then
   BAK="$LIVE/chrome/sine-mods/advanced-tab-groups/folder-look.uc.js.bak-leo2"
@@ -104,7 +144,7 @@ fi
 if [ -f "$ATG/userChrome.css" ]; then
   sed -i '' '/CUSTOM-LEO-START/,/CUSTOM-LEO-END/d' "$ATG/userChrome.css"
 fi
-if grep -qE 'leo-group-close|CUSTOM-LEO|LEO:' "$ATG/folder-look.uc.js" "$ATG/userChrome.css" "$ATG/advanced-tab-groups.uc.js"; then
+if grep -qsE 'leo-group-close|CUSTOM-LEO|LEO:' "$ATG/folder-look.uc.js" "$ATG/userChrome.css" "$ATG/advanced-tab-groups.uc.js"; then
   echo "WARNING: ATG copy still contains LEO customizations" >&2
 fi
 
@@ -117,7 +157,7 @@ mkdir -p "$MODS/zgcb-test-harness"
 cp "$REPO/test/harness.uc.js" "$MODS/zgcb-test-harness/harness.uc.js"
 echo "$HARNESS_ENTRY" | jq 'del(.enabled)' >"$MODS/zgcb-test-harness/theme.json"
 
-# 3. mods.json: ATG verbatim from live, the mod from its theme.json (or the spec literal
+# 3. mods.json: ATG verbatim from live (omitted entirely with --no-atg), the mod from its theme.json (or the spec literal
 #    while theme.json does not exist yet), and the harness.
 if [ -f "$REPO/theme.json" ]; then
   MOD_ENTRY="$(jq -c '.' "$REPO/theme.json")"
@@ -135,10 +175,10 @@ if [ -n "$missing" ] && [ "$MOD_ENABLED" = true ]; then
   MOD_ENTRY="$(echo "$MOD_ENTRY" | jq -c '.enabled = false')"
 fi
 jq -n \
-  --argjson atg "$(jq -c '."advanced-tab-groups"' "$LIVE/chrome/sine-mods/mods.json")" \
+  --argjson atg "$LIVE_ATG_ENTRY" \
   --argjson mod "$MOD_ENTRY" \
   --argjson harness "$HARNESS_ENTRY" \
-  '{"advanced-tab-groups": $atg, ($mod.id): $mod, ($harness.id): $harness}' >"$MODS/mods.json"
+  '(if $atg == null then {} else {"advanced-tab-groups": $atg} end) + {($mod.id): $mod, ($harness.id): $harness}' >"$MODS/mods.json"
 rm -f "$MODS/chrome.css" # Sine regenerates it from mods.json at startup
 
 # 4. Prefs.
@@ -150,6 +190,9 @@ user_pref("sine.allow-unsafe-js", true);
 user_pref("sine.auto-updates", false);
 user_pref("sine.engine.auto-update", false);
 user_pref("zgcb.before", $BEFORE);
+user_pref("zgcb.atg", $ATG_ON);
+user_pref("zgcb.variant", "$THEME$VARIANT");
+// Zen ships with plain tab groups off (ATG force-enables them): on in every run so the plain-group path is exercised.
 user_pref("browser.tabs.groups.enabled", true);
 user_pref("devtools.console.stdout.chrome", true);
 user_pref("browser.shell.checkDefaultBrowser", false);
@@ -163,10 +206,21 @@ user_pref("ui.systemUsesDarkTheme", $DARK_INT);
 user_pref("browser.theme.toolbar-theme", $TOOLBAR_THEME);
 user_pref("browser.theme.content-theme", $TOOLBAR_THEME);
 EOF
+  case "$ATG_LOOK" in
+    default) echo 'user_pref("browser.tabs.groups.folder-look", false);' ;;
+    arc)
+      echo 'user_pref("browser.tabs.groups.folder-look", false);'
+      echo 'user_pref("browser.tabs.groups.arc-style", true);'
+      echo 'user_pref("browser.tabs.groups.show-folder-button", true);'
+      ;;
+  esac
+  if $BIDI; then
+    echo 'user_pref("intl.l10n.pseudo", "bidi");'
+  fi
 } >"$TP/user.js"
 
 # 5. Launch a separate instance on the throwaway profile.
-echo "launching Zen ($MODE, $THEME) on $TP"
+echo "launching Zen ($MODE, $THEME$VARIANT, atg=$ATG_ON) on $TP"
 "$ZEN" -no-remote -new-instance --profile "$TP" >"$TP/zen.log" 2>&1 &
 PID=$!
 disown "$PID" 2>/dev/null || true # no "Terminated" job notice on kill
@@ -207,14 +261,54 @@ done
   exit 1
 }
 read -r X Y W H <<<"$BOUNDS"
-FULL="$SHOTS/$THEME-$MODE-full.png"
-OUT="$SHOTS/$THEME-$MODE.png"
-screencapture -x -R "$X,$Y,$W,$H" "$FULL"
+FULL="$SHOTS/$THEME$VARIANT-$MODE-full.png"
+OUT="$SHOTS/$THEME$VARIANT-$MODE.png"
+# Capture the test window itself by its CGWindowID, so another window on top (for example the
+# user's own Zen, which macOS may front instead because it shares the bundle id) cannot leak into
+# the screenshot. Falls back to a screen-region grab when the id cannot be found.
+find_window_id() {
+  osascript -l JavaScript - "$PID" "$X" "$Y" "$W" "$H" 2>/dev/null <<'JS' || true
+ObjC.import("CoreGraphics");
+function run(argv) {
+  const [pid, x, y, w0, h0] = argv.map(Number);
+  const all = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo($.kCGWindowListOptionAll, 0)));
+  // The browser window is the on-screen one whose bounds are closest to what System Events reported.
+  const dist = b => Math.abs(b.X - x) + Math.abs(b.Y - y) + Math.abs(b.Width - w0) + Math.abs(b.Height - h0);
+  const w = all
+    .filter(w => w.kCGWindowOwnerPID === pid && w.kCGWindowLayer === 0 && w.kCGWindowIsOnscreen)
+    .sort((a, b) => dist(a.kCGWindowBounds) - dist(b.kCGWindowBounds))
+    .find(w => dist(w.kCGWindowBounds) < 80);
+  if (w) return String(w.kCGWindowNumber);
+  const mine = all.filter(w => w.kCGWindowOwnerPID === pid).map(w => JSON.stringify([w.kCGWindowLayer, w.kCGWindowIsOnscreen, w.kCGWindowBounds]));
+  return `none ${x},${y} ${w0}x${h0}: ${mine.join(" ")}`;
+}
+JS
+}
+WIN_ID=""
+for _ in 1 2 3; do # the window server list can briefly lag behind System Events
+  WIN_ID="$(find_window_id)"
+  case "$WIN_ID" in "" | none*) sleep 0.5 ;; *) break ;; esac
+done
+case "$WIN_ID" in
+  none*)
+    echo "window list for pid $PID: $WIN_ID" >&2
+    WIN_ID=""
+    ;;
+esac
+if [ -n "$WIN_ID" ]; then
+  screencapture -x -o -l "$WIN_ID" "$FULL"
+else
+  echo "WARNING: no CGWindowID for pid $PID; grabbing the screen region instead" >&2
+  screencapture -x -R "$X,$Y,$W,$H" "$FULL"
+fi
 PX_W="$(sips -g pixelWidth "$FULL" | awk '/pixelWidth/{print $2}')"
 PX_H="$(sips -g pixelHeight "$FULL" | awk '/pixelHeight/{print $2}')"
 CROP_W=$((SIDEBAR_PT * PX_W / W))
-# sips treats offset 0 0 as "centered", so anchor at 1,1 (1 px from the top-left)
-sips -c "$((PX_H - 1))" "$CROP_W" --cropOffset 1 1 "$FULL" --out "$OUT" >/dev/null
+# sips treats offset 0 0 as "centered", so anchor at 1,1 (1 px from the top-left).
+# With --bidi the sidebar is on the right edge.
+CROP_X=1
+$BIDI && CROP_X=$((PX_W - CROP_W - 1))
+sips -c "$((PX_H - 1))" "$CROP_W" --cropOffset 1 "$CROP_X" "$FULL" --out "$OUT" >/dev/null
 echo "screenshot: $OUT (window $X,$Y ${W}x$H)"
 touch "$TP/zgcb-go"
 

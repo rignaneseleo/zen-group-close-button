@@ -155,6 +155,34 @@
     return { color: "transparent", source: "nothing opaque found" };
   }
 
+  // Real :hover state via the chrome-only InspectorUtils lock (synthetic mouse events do not set it).
+  // Waits past the 120 ms transition so computed values are the end state.
+  async function withHover(el, fn, settle = 300) {
+    InspectorUtils.addPseudoClassLock(el, ":hover");
+    try {
+      await sleep(settle);
+      return await fn();
+    } finally {
+      InspectorUtils.removePseudoClassLock(el, ":hover");
+    }
+  }
+
+  // color-mix(in srgb, <color> <pct>%, transparent) resolved by the style engine.
+  function washOf(color, pct) {
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = `color-mix(in srgb, ${color} ${pct}%, transparent)`;
+    gBrowser.tabContainer.appendChild(probe);
+    const bg = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return bg;
+  }
+
+  const isShown = el => {
+    const cs = getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    return cs.display !== "none" && cs.visibility === "visible" && r.width > 0 && r.height > 0;
+  };
+
   const fmtRect = r =>
     `[${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}]`;
 
@@ -182,8 +210,10 @@
       plainError: null,
       folder: null,
       split: "unavailable",
+      atg: Services.prefs.getBoolPref("zgcb.atg", true),
       notes: [],
     };
+    state.notes.push(`variant ${Services.prefs.getStringPref("zgcb.variant", "?")}, atg=${state.atg}`);
 
     // 1. plain tab group
     const tabs = openTabs(3);
@@ -240,7 +270,7 @@
 
   // ---- assertions ----
 
-  async function runAssertions({ plain, plainExpected, plainError, folder, split, notes }) {
+  async function runAssertions({ plain, plainExpected, plainError, folder, split, atg, notes }) {
     const results = [];
     const add = (name, pass, detail = "", extra = {}) => {
       results.push({ name, pass: !!pass, detail: String(detail), ...extra });
@@ -319,6 +349,33 @@
       );
     });
 
+    await guard("hover-state", async () => {
+      const problems = [];
+      const seen = [];
+      for (const [key, group] of targets) {
+        const btn = buttonOf(group);
+        if (!btn) {
+          problems.push(`${key}: no button`);
+          continue;
+        }
+        const rest = getComputedStyle(btn).backgroundColor;
+        await withHover(btn, () => {
+          const cs = getComputedStyle(btn);
+          const expected = washOf(cs.color, 10);
+          if (parseFloat(cs.opacity) !== 1) problems.push(`${key}: hover opacity ${cs.opacity}`);
+          if (cs.backgroundColor !== expected) {
+            problems.push(`${key}: hover background ${cs.backgroundColor} != 10% wash ${expected}`);
+          }
+          seen.push(`${key}: rest bg ${rest} -> hover opacity ${cs.opacity} bg ${cs.backgroundColor}`);
+        });
+      }
+      add(
+        "hover-state",
+        targets.length > 0 && problems.length === 0,
+        [...problems, ...seen].join("; ")
+      );
+    });
+
     await guard("label-color", async () => {
       const expected = toolbarColor();
       const problems = [];
@@ -374,6 +431,43 @@
       );
     });
 
+    await guard("x-rightmost-on-hover", async () => {
+      // With the header hovered, ATG may reveal extra header buttons (arc-style folder button):
+      // the × must still be the right-most (inline-end-most in RTL) visible child.
+      const problems = [];
+      const seen = [];
+      for (const [key, group] of targets) {
+        const btn = buttonOf(group);
+        const container = labelContainerOf(group);
+        if (!btn) {
+          problems.push(`${key}: no button`);
+          continue;
+        }
+        await withHover(container, () => {
+          const rtl = getComputedStyle(container).direction === "rtl";
+          const b = btn.getBoundingClientRect();
+          const shown = [...container.children].filter(el => el !== btn && isShown(el));
+          // Out-of-flow children (Zen's absolutely positioned folder icon) take no part in the flex
+          // order; overlap with them is no-overlap's job.
+          const inFlow = el => !["absolute", "fixed"].includes(getComputedStyle(el).position);
+          const beyond = shown.filter(inFlow).filter(el => {
+            const r = el.getBoundingClientRect();
+            return rtl ? r.left < b.left - 0.5 : r.right > b.right + 0.5;
+          });
+          for (const el of beyond) {
+            problems.push(`${key}: ${el.localName}.${[...el.classList].join(".")} ${fmtRect(el.getBoundingClientRect())} is past the × ${fmtRect(b)}`);
+          }
+          const names = shown.map(el => `${el.localName}.${[...el.classList].join(".")}`);
+          seen.push(`${key}${rtl ? " (rtl)" : ""}: × ${fmtRect(b)} after [${names.join(", ")}]`);
+        });
+      }
+      add(
+        "x-rightmost-on-hover",
+        targets.length > 0 && problems.length === 0,
+        [...problems, ...seen].join("; ")
+      );
+    });
+
     await guard("collapse-survives", async () => {
       folder.collapsed = true;
       await sleep(400);
@@ -412,21 +506,27 @@
     });
 
     await guard("atg-duplicate-hidden", async () => {
+      if (!atg) {
+        skip("atg-duplicate-hidden", "ATG not installed (--no-atg)");
+        return;
+      }
       const dup = labelContainerOf(plain)?.querySelector(".tab-close-button");
       if (!plain || !dup) {
         if (plain) skip("atg-duplicate-hidden", "no ATG close button on plain group");
         else noPlain("atg-duplicate-hidden", "no plain group");
         return;
       }
+      const container = labelContainerOf(plain);
       const d1 = getComputedStyle(dup).display;
-      labelContainerOf(plain).dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      container.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
       await sleep(200);
       const d2 = getComputedStyle(dup).display;
-      labelContainerOf(plain).dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+      container.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+      const d3 = await withHover(container, () => getComputedStyle(dup).display);
       add(
         "atg-duplicate-hidden",
-        d1 === "none" && d2 === "none",
-        `ATG .tab-close-button display before=${d1} after-mouseover=${d2}`
+        d1 === "none" && d2 === "none" && d3 === "none",
+        `ATG .tab-close-button display before=${d1} after-mouseover=${d2} locked-:hover=${d3}`
       );
     });
 
@@ -531,14 +631,23 @@
           return;
         }
         const before = gBrowser.tabs.length;
-        btn.click();
+        // Bubbling spy on the group: the × click must never reach the header toggle.
+        let reached = 0;
+        const spy = () => reached++;
+        group.addEventListener("click", spy);
+        try {
+          btn.click();
+        } finally {
+          group.removeEventListener("click", spy);
+        }
         const gone = await waitDisconnected(group);
         await sleep(300);
         const after = gBrowser.tabs.length;
         add(
           name,
-          gone && after <= before - 3,
-          `group ${gone ? "removed" : "still connected"}; tabs ${before} -> ${after}`
+          gone && after <= before - 3 && reached === 0,
+          `group ${gone ? "removed" : "still connected"}; tabs ${before} -> ${after}; ` +
+            `click reached group ${reached}×`
         );
       });
     }
