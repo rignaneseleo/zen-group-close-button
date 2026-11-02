@@ -11,7 +11,7 @@ A [Sine](https://github.com/CosmoCreeper/Sine) mod for [Zen Browser](https://zen
 ## What changes
 
 - Every tab group and folder header in the sidebar gets a × at its far right. It is always visible, dimmed at rest and full strength on hover.
-- One click closes the group together with all of its tabs, with no confirmation. Changed your mind? Press Cmd+Shift+T (Ctrl+Shift+T on Windows and Linux) to reopen the closed group.
+- One click closes the group together with all of its tabs, with no confirmation. Changed your mind? Press Cmd+Shift+T (Ctrl+Shift+T on Windows and Linux) to reopen the closed group. Reopening brings the tabs back, but not a live folder's feed subscription, and nested subfolders may come back flattened.
 - Group and folder titles use the sidebar's normal text color instead of the group color, so they read like the rest of the sidebar.
 
 ## Install
@@ -23,7 +23,7 @@ A [Sine](https://github.com/CosmoCreeper/Sine) mod for [Zen Browser](https://zen
 
 ## Works with
 
-- Zen 1.24 and later (verified on Zen 1.24b).
+- Tested on Zen 1.24b.
 - Plain tab groups and native Zen folders.
 - [Advanced Tab Groups](https://github.com/Vertex-Mods/Advanced-Tab-Groups), including its folder look. The mod hides ATG's own hover-only close button so you never see two.
 

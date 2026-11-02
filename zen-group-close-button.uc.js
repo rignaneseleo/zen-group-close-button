@@ -24,6 +24,8 @@
   let observer = null;
   // Groups whose close is in flight (e.g. waiting on a beforeunload prompt).
   const closing = new WeakSet();
+  // Set once the × turns out to have no glyph (Zen dropped .close-icon): stop decorating.
+  let iconMissing = false;
 
   const labelContainerOf = el =>
     el.querySelector(":scope > .tab-group-label-container");
@@ -67,6 +69,7 @@
     swallow(event);
     if (event.button !== 0) return;
     // Second click of a double-click: the next header may have slid under the pointer.
+    // Also throttles fast repeated closes (clicks within the double-click interval); accepted trade-off.
     if (event.detail > 1) return;
     // Resolve at click time: the button always sits in <group> > .tab-group-label-container.
     const group = event.currentTarget.parentElement?.parentElement;
@@ -74,6 +77,7 @@
   }
 
   function decorate(group) {
+    if (iconMissing) return;
     const container = labelContainerOf(group);
     if (!container || container.querySelector(`:scope > .${BTN_CLASS}`)) return;
     const btn = document.createXULElement("image");
@@ -85,6 +89,12 @@
     btn.addEventListener("dblclick", swallow);
     btn.addEventListener("click", onButtonClick);
     container.appendChild(btn);
+    // An invisible destructive hotspot is worse than no button: bail out if the glyph is gone.
+    if (getComputedStyle(btn).listStyleImage === "none") {
+      btn.remove();
+      iconMissing = true;
+      console.warn(LOG, ".close-icon has no list-style-image in this Zen version; not adding close buttons");
+    }
   }
 
   function refreshNow() {

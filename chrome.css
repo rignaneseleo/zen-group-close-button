@@ -1,13 +1,14 @@
 /* Group Close Button — USER sheet: every rule is !important and scoped under #tabbrowser-tabs. */
 
-/* Header row: beats Zen's plain tab-group header, which is a vbox (column); folders are already a row. */
-#tabbrowser-tabs :is(tab-group, zen-folder):not([split-view-group]) > .tab-group-label-container {
+/* Header row: beats Zen's plain tab-group header, which is a vbox (column); folders are already a row.
+   Expanded sidebar only: the collapsed sidebar's square labels are left alone. */
+:root[zen-sidebar-expanded] #tabbrowser-tabs :is(tab-group, zen-folder):not([split-view-group]) > .tab-group-label-container {
   flex-direction: row !important;
   align-items: center !important;
 }
 
-/* Label flex: beats Zen/ATG label sizing so a long title shrinks instead of pushing the × out. */
-#tabbrowser-tabs :is(tab-group, zen-folder):not([split-view-group]) > .tab-group-label-container > .tab-group-label {
+/* Label flex: beats Zen/ATG label sizing so a long title shrinks instead of pushing the × out. Expanded sidebar only. */
+:root[zen-sidebar-expanded] #tabbrowser-tabs :is(tab-group, zen-folder):not([split-view-group]) > .tab-group-label-container > .tab-group-label {
   flex: 1 1 auto !important;
   min-width: 0 !important;
 }
@@ -19,6 +20,7 @@
   justify-content: center !important;
   flex: 0 0 auto !important;
   margin-inline-start: auto !important;
+  order: 1 !important; /* always drawn last, after ATG's hover-only .tab-group-folder-button */
   width: 20px !important;
   height: 20px !important;
   padding: 4px !important;
@@ -49,6 +51,12 @@
   }
 }
 
+/* RTL: Zen (and ATG's folder look) pin .tab-group-folder-icon physically at left: 5px even in RTL, which
+   is the inline end where the × sits; the margin keeps the × clear of that icon. */
+:root[zen-sidebar-expanded]:is([dir="rtl"], :-moz-locale-dir(rtl)) #tabbrowser-tabs .tab-group-label-container:has(> .tab-group-folder-icon) > .zen-group-close-button {
+  margin-inline-end: 30px !important;
+}
+
 /* Collapsed sidebar: beats the button display above; Zen hides group labels when the sidebar is collapsed. */
 :root:not([zen-sidebar-expanded]) #tabbrowser-tabs .tab-group-label-container > .zen-group-close-button {
   display: none !important;
@@ -59,12 +67,23 @@
   display: none !important;
 }
 
-/* ATG duplicate: beats ATG's hover-only header .tab-close-button rule (0,4,1) via the id prefix. */
-#tabbrowser-tabs tab-group:has(> .tab-group-label-container > .zen-group-close-button) .tab-group-label-container .tab-close-button {
+/* ATG duplicate: beats ATG's hover-only header .tab-close-button rule (0,4,1) via the id prefix.
+   Child combinators only, so a parent group's match never hides a nested group's own header button. */
+#tabbrowser-tabs tab-group:has(> .tab-group-label-container > .zen-group-close-button) > .tab-group-label-container > .tab-close-button {
   display: none !important;
 }
 
-/* Title color: beats ATG/Zen group-colour label text so titles use the sidebar text colour. */
-#tabbrowser-tabs :is(tab-group, zen-folder):not([split-view-group]) > .tab-group-label-container > .tab-group-label {
+/* Title: beats ATG/Zen group-colour label text so titles use the sidebar text colour, and beats
+   stock Firefox's coloured pill (background --tab-group-color, max-width 10em, centred text) so
+   plain-group titles without ATG read like Zen folder titles. Expanded sidebar only. */
+:root[zen-sidebar-expanded] #tabbrowser-tabs :is(tab-group, zen-folder):not([split-view-group]) > .tab-group-label-container > .tab-group-label {
   color: var(--toolbar-color) !important;
+  background-color: transparent !important;
+  max-width: none !important;
+  text-align: start !important;
+}
+
+/* Collapsed plain group: beats stock Firefox's pill outline; the keyboard-focus outline is kept. */
+:root[zen-sidebar-expanded] #tabbrowser-tabs tab-group[collapsed]:not([split-view-group]) > .tab-group-label-container > .tab-group-label:not(.tablist-keyboard-focus) {
+  outline: none !important;
 }
