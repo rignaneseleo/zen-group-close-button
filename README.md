@@ -16,9 +16,9 @@ A [Sine](https://github.com/CosmoCreeper/Sine) mod for [Zen Browser](https://zen
 
 ## Install
 
-1. Open Sine in Zen's settings.
+1. Open Sine in Zen's settings and turn on "Enable installing JS from unofficial sources" (`sine.allow-unsafe-js`). Without it Sine silently skips the script of any mod installed from GitHub, the stylesheet still loads, and the × never appears. This is the most common reason the mod seems to do nothing.
 2. Under "or, add your own locally from a GitHub repo", enter `rignaneseleo/zen-group-close-button` and install.
-3. Until the mod is listed in the Sine store, turn on "Enable installing JS from unofficial sources" (`sine.allow-unsafe-js`), otherwise the mod's script does not run and the × never appears.
+3. Make sure the mod's toggle in the installed-mods list is on.
 4. Restart Zen.
 
 ## Works with
