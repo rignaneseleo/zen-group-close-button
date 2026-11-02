@@ -220,8 +220,7 @@ touch "$TP/zgcb-go"
 
 # 7. Results.
 RES="$TP/zgcb-results.json"
-wait_file "$RES" 60
-sleep 0.5 # let the write finish
+wait_file "$RES" 60 # the harness writes it atomically (tmpPath + rename)
 cleanup
 PID=""
 

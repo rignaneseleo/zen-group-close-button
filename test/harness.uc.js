@@ -51,7 +51,11 @@
     }
   }
 
-  const writeResults = data => IOUtils.writeJSON(profilePath("zgcb-results.json"), data);
+  // Atomic: written to .tmp then renamed, so run.sh never reads a partial file.
+  const writeResults = data => {
+    const path = profilePath("zgcb-results.json");
+    return IOUtils.writeJSON(path, data, { tmpPath: path + ".tmp" });
+  };
   const writeReady = () => IOUtils.writeUTF8(profilePath("zgcb-ready"), String(Date.now()));
 
   // ---- DOM helpers ----
@@ -115,6 +119,37 @@
     return { left, right, top, bottom, width: right - left, height: bottom - top };
   }
 
+  // Parse "rgb(r, g, b)" / "rgba(r, g, b, a)" -> [r, g, b, a]; null when unparseable.
+  function parseColor(c) {
+    if (c === "transparent") return [0, 0, 0, 0];
+    const m = /^rgba?\(([^)]+)\)$/.exec(String(c).trim());
+    if (!m) return null;
+    const p = m[1].split(/[\s,/]+/).filter(Boolean).map(Number);
+    return [p[0], p[1], p[2], p.length > 3 ? p[3] : 1];
+  }
+  const sameRgb = (a, b) => {
+    const pa = parseColor(a);
+    const pb = parseColor(b);
+    return !!pa && !!pb && pa[0] === pb[0] && pa[1] === pb[1] && pa[2] === pb[2];
+  };
+
+  // First non-transparent computed background-color walking up from el (crossing shadow
+  // roots), then #navigator-toolbox, then body. Returns {color, source}.
+  function opaqueBackgroundOf(el) {
+    const isOpaque = c => (parseColor(c)?.[3] ?? 0) > 0;
+    for (let node = el; node; node = node.parentElement ?? node.getRootNode?.().host ?? null) {
+      const c = getComputedStyle(node).backgroundColor;
+      if (isOpaque(c)) return { color: c, source: describe(node) };
+    }
+    for (const sel of ["#navigator-toolbox", "body"]) {
+      const node = document.querySelector(sel);
+      if (!node) continue;
+      const c = getComputedStyle(node).backgroundColor;
+      if (isOpaque(c)) return { color: c, source: sel };
+    }
+    return { color: "transparent", source: "nothing opaque found" };
+  }
+
   const fmtRect = r =>
     `[${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}]`;
 
@@ -136,20 +171,30 @@
     const openTabs = n =>
       Array.from({ length: n }, () => gBrowser.addTab("about:blank", { triggeringPrincipal: sys }));
 
-    const state = { plain: null, folder: null, split: "unavailable", notes: [] };
+    const state = {
+      plain: null,
+      plainExpected: Services.prefs.getBoolPref("browser.tabs.groups.enabled", false),
+      plainError: null,
+      folder: null,
+      split: "unavailable",
+      notes: [],
+    };
 
     // 1. plain tab group
     const tabs = openTabs(3);
-    if (Services.prefs.getBoolPref("browser.tabs.groups.enabled", false)) {
+    if (state.plainExpected) {
       try {
-        state.plain = gBrowser.addTabGroup(tabs, {
-          label: "Research",
-          color: "blue",
-          insertBefore: tabs[0],
-        });
+        state.plain =
+          gBrowser.addTabGroup(tabs, {
+            label: "Research",
+            color: "blue",
+            insertBefore: tabs[0],
+          }) ?? null;
+        if (!state.plain) state.plainError = "addTabGroup returned no group";
       } catch (e) {
-        state.notes.push(`addTabGroup failed: ${e}`);
+        state.plainError = `addTabGroup failed: ${e}`;
       }
+      if (state.plainError) state.notes.push(state.plainError);
     } else {
       state.notes.push("browser.tabs.groups.enabled is false");
     }
@@ -190,7 +235,7 @@
 
   // ---- assertions ----
 
-  async function runAssertions({ plain, folder, split, notes }) {
+  async function runAssertions({ plain, plainExpected, plainError, folder, split, notes }) {
     const results = [];
     const add = (name, pass, detail = "", extra = {}) => {
       results.push({ name, pass: !!pass, detail: String(detail), ...extra });
@@ -209,10 +254,13 @@
       ["plain", plain],
     ].filter(([, g]) => g);
 
+    // A missing plain group may only be skipped when tab groups are disabled by pref.
+    const noPlain = (name, detail) =>
+      plainExpected ? add(name, false, `${detail}: ${plainError}`) : skip(name, detail);
     add(
       "setup",
-      !!folder,
-      `folder=${!!folder} plain=${plain ? "created" : "skipped"} split=${split}` +
+      !!folder && (!plainExpected || !!plain),
+      `folder=${!!folder} plain=${plain ? "created" : plainExpected ? "FAILED" : "skipped"} split=${split}` +
         (notes.length ? `; ${notes.join("; ")}` : "")
     );
     await guard("buttons-on-eligible", async () => {
@@ -236,12 +284,13 @@
     });
 
     await guard("button-visible", async () => {
-      const sidebarBg = getComputedStyle(gBrowser.tabContainer).backgroundColor;
       const problems = [];
+      const seen = [];
       for (const [key, group] of targets) {
+        const bg = opaqueBackgroundOf(labelContainerOf(group));
         const btn = buttonOf(group);
         if (!btn) {
-          problems.push(`${key}: no button`);
+          problems.push(`${key}: no button (bg ${bg.color} from ${bg.source})`);
           continue;
         }
         const cs = getComputedStyle(btn);
@@ -249,12 +298,15 @@
         if (cs.display === "none") problems.push(`${key}: display none`);
         if (cs.visibility !== "visible") problems.push(`${key}: visibility ${cs.visibility}`);
         if (!(opacity >= 0.5 && opacity <= 0.7)) problems.push(`${key}: opacity ${cs.opacity}`);
-        if (cs.color === sidebarBg) problems.push(`${key}: color ${cs.color} equals sidebar bg`);
+        if (sameRgb(cs.color, bg.color)) {
+          problems.push(`${key}: color ${cs.color} equals bg ${bg.color} from ${bg.source}`);
+        }
+        seen.push(`${key}: color ${cs.color} vs bg ${bg.color} from ${bg.source}`);
       }
       add(
         "button-visible",
         targets.length > 0 && problems.length === 0,
-        problems.join("; ") || `ok (${targets.map(([k]) => k).join(", ")})`
+        problems.length ? [...problems, ...seen].join("; ") : `ok (${seen.join("; ")})`
       );
     });
 
@@ -357,7 +409,8 @@
     await guard("atg-duplicate-hidden", async () => {
       const dup = labelContainerOf(plain)?.querySelector(".tab-close-button");
       if (!plain || !dup) {
-        skip("atg-duplicate-hidden", plain ? "no ATG close button on plain group" : "no plain group");
+        if (plain) skip("atg-duplicate-hidden", "no ATG close button on plain group");
+        else noPlain("atg-duplicate-hidden", "no plain group");
         return;
       }
       const d1 = getComputedStyle(dup).display;
@@ -420,7 +473,7 @@
       });
     }
     if (!plain) {
-      skip("click-closes-plain", "no plain group");
+      noPlain("click-closes-plain", "no plain group");
     }
 
     return results;
