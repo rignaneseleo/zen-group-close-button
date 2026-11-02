@@ -54,6 +54,11 @@
   display: none !important;
 }
 
+/* Drag image: beats the button display above on the deep clone Zen's ZenDragAndDrop snapshots synchronously. */
+#tabbrowser-tabs [drag-image] .tab-group-label-container > .zen-group-close-button {
+  display: none !important;
+}
+
 /* ATG duplicate: beats ATG's hover-only header .tab-close-button rule (0,4,1) via the id prefix. */
 #tabbrowser-tabs tab-group:has(> .tab-group-label-container > .zen-group-close-button) .tab-group-label-container .tab-close-button {
   display: none !important;

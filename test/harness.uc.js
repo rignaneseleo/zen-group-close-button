@@ -457,6 +457,71 @@
       }
     });
 
+    await guard("drag-image-hidden", async () => {
+      // Mirrors ZenDragAndDrop: deep clone of each decorated header, [drag-image], in the periphery.
+      const periphery = document.getElementById("tabbrowser-arrowscrollbox-periphery");
+      const parent = periphery ?? gBrowser.tabContainer;
+      const where = `parent=${periphery ? "periphery" : "tabContainer"} (inside #tabbrowser-tabs: ${gBrowser.tabContainer.contains(parent)})`;
+      const problems = [];
+      const seen = [];
+      for (const [key, group] of targets) {
+        if (!buttonOf(group)) {
+          problems.push(`${key}: source has no button`);
+          continue;
+        }
+        const clone = group.cloneNode(true);
+        clone.setAttribute("drag-image", "true");
+        const before = clone.querySelectorAll(BTN).length;
+        parent.appendChild(clone);
+        try {
+          // Read synchronously: Zen calls setDragImage before any rAF-based cleanup can run.
+          // The element's connect logic may already have dropped the cloned ×; inject one so the
+          // CSS rule itself is exercised either way.
+          const survived = clone.querySelectorAll(BTN).length;
+          const container = labelContainerOf(clone);
+          if (!survived && container) {
+            const probe = document.createXULElement("image");
+            probe.className = "zen-group-close-button close-icon";
+            container.appendChild(probe);
+          }
+          const btns = [...clone.querySelectorAll(BTN)];
+          if (!btns.length) problems.push(`${key}: clone has no label container to probe`);
+          const shown = btns.map(b => getComputedStyle(b).display).filter(d => d !== "none");
+          seen.push(`${key}: clone buttons before/after append ${before}/${survived}, probed displays [${btns.map(b => getComputedStyle(b).display).join(",")}]`);
+          if (shown.length) problems.push(`${key}: ${shown.length} visible × in drag clone`);
+        } finally {
+          clone.remove();
+        }
+      }
+      add(
+        "drag-image-hidden",
+        targets.length > 0 && problems.length === 0,
+        `${[...problems, ...seen].join("; ")}; ${where}`
+      );
+    });
+
+    await guard("dblclick-guard", async () => {
+      const sys = Services.scriptSecurityManager.getSystemPrincipal();
+      const tabs = [0, 1].map(() => gBrowser.addTab("about:blank", { triggeringPrincipal: sys }));
+      const fresh = plainExpected
+        ? gBrowser.addTabGroup(tabs, { label: "Dblclick", color: "red", insertBefore: tabs[0] })
+        : gZenFolders.createFolder(tabs, { label: "Dblclick", renameFolder: false });
+      const btn = await waitFor(() => buttonOf(fresh), { timeout: 5000, what: "fresh group button" });
+      for (let i = 0; i < 2; i++) {
+        btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, detail: 2 }));
+      }
+      await sleep(500);
+      const survived = fresh.isConnected;
+      btn.click(); // clean up via the normal single click
+      const cleaned = await waitDisconnected(fresh);
+      add(
+        "dblclick-guard",
+        survived && cleaned,
+        `${describe(fresh)} after two detail=2 clicks: ${survived ? "still connected" : "closed"}; ` +
+          `single click ${cleaned ? "closed it" : "did not close it"}`
+      );
+    });
+
     for (const [key, group] of targets) {
       const name = `click-closes-${key}`;
       await guard(name, async () => {

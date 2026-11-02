@@ -22,6 +22,8 @@
   let destroyed = false;
   let rafId = 0;
   let observer = null;
+  // Groups whose close is in flight (e.g. waiting on a beforeunload prompt).
+  const closing = new WeakSet();
 
   const labelContainerOf = el =>
     el.querySelector(":scope > .tab-group-label-container");
@@ -40,7 +42,8 @@
   }
 
   async function closeGroup(group) {
-    if (!group?.isConnected) return;
+    if (!group?.isConnected || closing.has(group)) return;
+    closing.add(group);
     try {
       if (group.localName === "zen-folder") {
         await group.delete();
@@ -49,6 +52,8 @@
       }
     } catch (e) {
       console.error(LOG, "closing group failed", e);
+    } finally {
+      closing.delete(group);
     }
   }
 
@@ -61,6 +66,8 @@
   function onButtonClick(event) {
     swallow(event);
     if (event.button !== 0) return;
+    // Second click of a double-click: the next header may have slid under the pointer.
+    if (event.detail > 1) return;
     // Resolve at click time: the button always sits in <group> > .tab-group-label-container.
     const group = event.currentTarget.parentElement?.parentElement;
     if (group && isEligible(group)) closeGroup(group);
@@ -156,9 +163,14 @@
         );
       }
       await window.gZenWorkspaces?.promiseInitialized;
-      if (!window.gBrowser?.tabContainer) {
-        console.error(LOG, "gBrowser.tabContainer not available; not starting");
-        return;
+      // Bounded wait for gBrowser: poll every 100 ms for up to 10 s.
+      for (let waited = 0; !window.gBrowser?.tabContainer; waited += 100) {
+        if (destroyed) return;
+        if (waited >= 10000) {
+          console.error(LOG, "gBrowser.tabContainer not available after 10 s; not starting");
+          return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
       start();
     } catch (e) {
